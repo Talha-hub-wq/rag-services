@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # Backend FastAPI service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # OpenAI Configuration
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-large}
+      CHAT_MODEL: ${CHAT_MODEL:-gpt-4-turbo-preview}
+      
+      # Supabase Configuration
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      
+      # Document Processing
+      CHUNK_SIZE: ${CHUNK_SIZE:-500}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-50}
+      DOCUMENTS_PATH: ${DOCUMENTS_PATH:-/app/documents}
+      
+      # JWT Configuration
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      
+      # Email Configuration
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      EMAIL_FROM: ${EMAIL_FROM}
+    
+    volumes:
+      # Mount documents folder
+      - ./documents:/app/documents
+      # Mount logs folder
+      - ./logs:/app/logs
+    
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    
+    networks:
+      - rag-network
+    
+    # depends_on:
+    #   - logs-volume
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+  
+  # Frontend Streamlit service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: rag-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      API_BASE_URL: http://backend:8000
+      STREAMLIT_SERVER_HEADLESS: true
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_ENABLECORS: "false"
+      STREAMLIT_SERVER_ENABLEXSRFPROTECTION: "false"
+    
+    volumes:
+      # Mount logs folder
+      - ./logs:/app/logs
+    
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    networks:
+      - rag-network
+    
+    depends_on:
+      backend:
+        condition: service_healthy
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+  
+  # # Helper service for creating volumes
+  # logs-volume:
+  #   image: alpine:latest
+  #   container_name: rag-logs-setup
+  #   volumes:
+  #     - ./logs:/logs
+  #   command: sh -c "mkdir -p /logs"
+  #   networks:
+  #     - rag-network
+  #   profiles:
+  #     - init
+
+networks:
+  rag-network:
+    driver: bridge
+
+volumes:
+  documents:
+    driver: local
+  logs:
+    driver: local
