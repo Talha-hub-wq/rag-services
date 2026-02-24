@@ -354,6 +354,7 @@ strategy:
    ```yaml
    - uses: actions/setup-python@v4
      with:
+       python-version: "3.11"
        cache: 'pip'
    ```
 
