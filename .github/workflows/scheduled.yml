@@ -100,7 +100,7 @@ jobs:
           pytest -v --cov=. --cov-report=html --tb=short
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-report-${{ matrix.python-version }}
           path: htmlcov/
@@ -227,7 +227,7 @@ jobs:
         run: pylint services/ models/ config/ --output-format=json > pylint-report.json || true
 
       - name: Store quality metrics
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: quality-metrics
           path: pylint-report.json
