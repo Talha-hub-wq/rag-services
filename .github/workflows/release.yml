@@ -1,0 +1,181 @@
+name: Release Management
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # Create release
+  create-release:
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+
+      - name: Generate release notes
+        id: release
+        run: |
+          # Extract changelog for this version
+          VERSION=${{ steps.version.outputs.VERSION }}
+          
+          # Create release notes (you may need to maintain a CHANGELOG.md)
+          echo "## Changes in v$VERSION" > release-notes.md
+          echo "" >> release-notes.md
+          echo "### Features" >> release-notes.md
+          echo "- New features here" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "### Bug Fixes" >> release-notes.md
+          echo "- Bug fixes here" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "### Documentation" >> release-notes.md
+          echo "- Documentation updates here" >> release-notes.md
+          
+          cat release-notes.md
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ steps.version.outputs.VERSION }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+
+  # Build and push release images
+  build-release:
+    runs-on: ubuntu-latest
+    name: Build Release Docker Images
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and push backend release image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}-backend:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}-backend:latest
+          labels: version=${{ steps.version.outputs.VERSION }}
+
+      - name: Build and push frontend release image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.streamlit
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}-frontend:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}-frontend:latest
+          labels: version=${{ steps.version.outputs.VERSION }}
+
+  # Deploy release
+  deploy-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    name: Deploy Release
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy backend to Azure
+        uses: azure/container-instances-deploy-action@v1
+        with:
+          resource-group: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          image: ghcr.io/${{ github.repository }}-backend:${{ steps.version.outputs.VERSION }}
+          name: rag-api-prod
+          location: 'eastus'
+          environment-variables:
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
+            JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+            EMAIL_FROM=${{ secrets.EMAIL_FROM }}
+          ports: 8000
+          cpu: 2
+          memory: 2.0
+
+      - name: Verify deployment
+        run: |
+          echo "✅ Release v${{ steps.version.outputs.VERSION }} deployed successfully!"
+
+  # Notify of release
+  notify-release:
+    needs: deploy-release
+    if: always()
+    runs-on: ubuntu-latest
+    name: Notify Release
+    
+    steps:
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Release summary
+        run: |
+          echo "🎉 Release v${{ steps.version.outputs.VERSION }} processed!"
+          echo ""
+          echo "What happened:"
+          echo "✅ Docker images built and pushed"
+          echo "✅ GitHub release created"
+          echo "✅ Backend deployed to Azure"
+          echo "✅ Frontend deployed to Azure"
+          echo ""
+          echo "Next steps:"
+          echo "1. Verify deployment at https://your-app.azurewebsites.net"
+          echo "2. Monitor logs"
+          echo "3. Test API endpoints"

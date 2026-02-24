@@ -1,0 +1,249 @@
+name: Scheduled Maintenance
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  # Daily dependency updates
+  update-dependencies:
+    runs-on: ubuntu-latest
+    name: Update Dependencies
+    
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Update dependencies
+        id: update
+        run: |
+          pip install --upgrade pip pip-tools
+          pip-compile requirements.txt --upgrade --output-file=requirements-updated.txt
+          
+          # Compare with existing
+          if ! diff -q requirements.txt requirements-updated.txt > /dev/null; then
+            echo "UPDATED=true" >> $GITHUB_OUTPUT
+            mv requirements-updated.txt requirements.txt
+          else
+            echo "UPDATED=false" >> $GITHUB_OUTPUT
+            rm -f requirements-updated.txt
+          fi
+
+      - name: Create Pull Request for dependency updates
+        if: steps.update.outputs.UPDATED == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: 'chore: update dependencies'
+          title: '[Automated] Update Python dependencies'
+          body: |
+            ## Automated Dependency Updates
+            
+            This is an automated PR to update Python dependencies.
+            
+            **What to check:**
+            - [ ] Run tests locally
+            - [ ] Check for breaking changes
+            - [ ] Review security updates
+            
+            ### Automated checks:
+            - Tests will run automatically
+            - Security scanning will be performed
+          branch: deps/auto-update
+          delete-branch: true
+          labels: 'dependencies'
+
+  # Nightly test run
+  nightly-tests:
+    runs-on: ubuntu-latest
+    name: Nightly Test Suite
+    
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run comprehensive test suite
+        env:
+          OPENAI_API_KEY: sk-test-key
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_KEY: test-key
+          JWT_SECRET_KEY: test-secret-key-12345678
+          DOCUMENTS_PATH: /tmp/documents
+          SMTP_USER: test@example.com
+          SMTP_PASSWORD: test
+          EMAIL_FROM: test@example.com
+        run: |
+          pytest -v --cov=. --cov-report=html --tb=short
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report-${{ matrix.python-version }}
+          path: htmlcov/
+
+  # Security scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Nightly Security Scan
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Check dependencies for vulnerabilities
+        run: |
+          pip install safety
+          safety check --json || true
+
+  # Build Docker images
+  nightly-build:
+    runs-on: ubuntu-latest
+    name: Nightly Docker Build
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build backend image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.streamlit
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha
+
+  # Performance benchmarks
+  performance-test:
+    runs-on: ubuntu-latest
+    name: Performance Benchmarks
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt pytest-benchmark
+
+      - name: Run performance tests
+        env:
+          OPENAI_API_KEY: sk-test-key
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_KEY: test-key
+          JWT_SECRET_KEY: test-secret-key-12345678
+          DOCUMENTS_PATH: /tmp/documents
+          SMTP_USER: test@example.com
+          SMTP_PASSWORD: test
+          EMAIL_FROM: test@example.com
+        run: pytest -v --benchmark-only || true
+
+  # Code quality trends
+  quality-check:
+    runs-on: ubuntu-latest
+    name: Code Quality Trends
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt pylint
+
+      - name: Generate pylint report
+        run: pylint services/ models/ config/ --output-format=json > pylint-report.json || true
+
+      - name: Store quality metrics
+        uses: actions/upload-artifact@v3
+        with:
+          name: quality-metrics
+          path: pylint-report.json
+
+  # Notify on completion
+  notify:
+    needs: [nightly-tests, security-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    name: Notify Results
+    
+    steps:
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.nightly-tests.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ]; then
+            echo "✅ All nightly checks passed"
+          else
+            echo "⚠️ Some checks failed or were skipped"
+          fi

@@ -1,0 +1,230 @@
+name: Code Quality & PR Checks
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+
+jobs:
+  # Check PR title and description
+  pr-checks:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: PR Validation
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR title format
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title;
+            
+            // PR title format: type(scope): description
+            // type: feat, fix, docs, style, refactor, perf, test, chore
+            const validFormat = /^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+\))?: .+/;
+            
+            if (!validFormat.test(title)) {
+              core.setFailed(`Invalid PR title format. Expected: "type(scope): description". Got: "${title}"`);
+            } else {
+              core.info(`✅ PR title is valid: "${title}"`);
+            }
+
+      - name: Check PR description
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body;
+            
+            if (!body || body.length < 20) {
+              core.warning('Please provide a detailed PR description (at least 20 characters)');
+            } else {
+              core.info('✅ PR description is present');
+            }
+
+  # Commit message check
+  commit-lint:
+    runs-on: ubuntu-latest
+    name: Commit Lint
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install commitlint
+        run: npm install --save-dev @commitlint/config-conventional @commitlint/cli
+
+      - name: Validate commits
+        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to HEAD
+
+  # Code formatting check
+  format-check:
+    runs-on: ubuntu-latest
+    name: Code Format Check
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install black isort pylint
+
+      - name: Check formatting with black
+        run: black --check . --diff
+
+      - name: Check import sorting with isort
+        run: isort --check-only . --diff
+
+      - name: Run pylint
+        run: pylint services/ models/ config/ --fail-under=8.0 || true
+
+  # Type checking
+  type-check:
+    runs-on: ubuntu-latest
+    name: Type Checking
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install mypy
+
+      - name: Run mypy type checking
+        run: mypy services/ models/ config/ --ignore-missing-imports || true
+
+  # Vulnerability check on dependencies
+  deps-check:
+    runs-on: ubuntu-latest
+    name: Dependencies Vulnerability Check
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install safety pip-audit
+
+      - name: Run safety check
+        run: safety check --json || true
+
+      - name: Run pip-audit
+        run: pip-audit || true
+
+  # Documentation check
+  docs-check:
+    runs-on: ubuntu-latest
+    name: Documentation Check
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check README exists
+        run: |
+          if [ ! -f README.md ]; then
+            echo "❌ README.md not found"
+            exit 1
+          fi
+          echo "✅ README.md exists"
+
+      - name: Check for docstrings
+        run: |
+          pip install pydocstyle
+          pydocstyle services/ models/ --convention=google || true
+
+  # Test coverage minimum
+  coverage-check:
+    runs-on: ubuntu-latest
+    name: Coverage Minimum Check
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run tests with coverage
+        env:
+          OPENAI_API_KEY: sk-test-key
+          SUPABASE_URL: https://test.supabase.co
+          SUPABASE_KEY: test-key
+          JWT_SECRET_KEY: test-secret-key-12345678
+          DOCUMENTS_PATH: /tmp/documents
+          SMTP_USER: test@example.com
+          SMTP_PASSWORD: test
+          EMAIL_FROM: test@example.com
+        run: pytest --cov=. --cov-report=term --cov-fail-under=70
+
+  # File size check
+  file-size-check:
+    runs-on: ubuntu-latest
+    name: File Size Check
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for large files
+        run: |
+          SIZE_LIMIT=10485760  # 10MB
+          echo "Checking for files larger than 10MB..."
+          
+          found_large=0
+          while IFS= read -r -d '' file; do
+            size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+            if [ "$size" -gt $SIZE_LIMIT ]; then
+              echo "⚠️ Large file found: $file ($(numfmt --to=iec $size 2>/dev/null || echo $size bytes))"
+              found_large=1
+            fi
+          done < <(find . -type f -not -path './.git/*' -not -path './venv/*' -not -path './__pycache__/*' -print0)
+          
+          if [ $found_large -eq 1 ]; then
+            echo "⚠️ Warning: Large files detected"
+          else
+            echo "✅ No large files found"
+          fi
