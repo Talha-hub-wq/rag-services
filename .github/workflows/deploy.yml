@@ -2,7 +2,7 @@ name: Deploy to Azure
 
 on:
   push:
-    branches: [ main ]
+    branches: [ non-existent-branch ]  # DISABLED - No Azure setup
     tags: [ 'v*' ]
   workflow_dispatch:
 

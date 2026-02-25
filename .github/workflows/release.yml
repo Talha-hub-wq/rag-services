@@ -3,7 +3,7 @@ name: Release Management
 on:
   push:
     tags:
-      - 'v*'
+      - 'v-disabled-*'  # DISABLED - Needs Azure setup
 
 jobs:
   # Create release
