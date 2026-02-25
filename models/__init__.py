@@ -3,7 +3,7 @@ from .schemas import (
     ChatResponse,
     HealthResponse,
     IndexStatus,
-    ErrorResponse
+    ErrorResponse,
 )
 
 __all__ = [
@@ -11,5 +11,5 @@ __all__ = [
     "ChatResponse",
     "HealthResponse",
     "IndexStatus",
-    "ErrorResponse"
+    "ErrorResponse",
 ]

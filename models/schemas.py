@@ -1,36 +1,44 @@
-from pydantic import BaseModel, Field , EmailStr
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
+
     query: str = Field(..., description="User's question", min_length=1)
-    top_k: int = Field(default=5, description="Number of similar documents to retrieve", ge=1, le=20)
+    top_k: int = Field(
+        default=5, description="Number of similar documents to retrieve", ge=1, le=20
+    )
     similarity_threshold: float = Field(
-        default=0.5, 
-        description="Minimum similarity score for retrieval", 
-        ge=0.0, 
-        le=1.0
+        default=0.5,
+        description="Minimum similarity score for retrieval",
+        ge=0.0,
+        le=1.0,
     )
 
 
 class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
+
     query: str = Field(..., description="Original user query")
     answer: str = Field(..., description="Generated answer")
-    sources: List[Dict[str, Any]] = Field(default_factory=list, description="Source documents used")
+    sources: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Source documents used"
+    )
     num_sources: int = Field(..., description="Number of source documents retrieved")
 
 
 class HealthResponse(BaseModel):
     """Response model for health check endpoint."""
+
     status: str = Field(..., description="Service status")
     version: str = Field(..., description="API version")
 
 
 class IndexStatus(BaseModel):
     """Status of document indexing process."""
+
     status: str = Field(..., description="Indexing status")
     total_documents: int = Field(..., description="Total documents found")
     total_chunks: int = Field(..., description="Total chunks created")
@@ -41,9 +49,9 @@ class IndexStatus(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Error response model."""
+
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Detailed error information")
-
 
 
 class UserSignup(BaseModel):

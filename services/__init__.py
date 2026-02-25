@@ -9,5 +9,5 @@ __all__ = [
     "TextProcessor",
     "EmbeddingService",
     "VectorStore",
-    "RAGService"
+    "RAGService",
 ]
