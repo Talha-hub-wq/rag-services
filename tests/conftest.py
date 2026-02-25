@@ -197,8 +197,18 @@ def fastapi_test_client(mock_openai_client, mock_supabase_client):
 
 
 @pytest.fixture(autouse=True)
-def patch_supabase(mock_supabase_client):
-    """Automatically patch Supabase client in all tests."""
+def patch_supabase_create(mock_supabase_client):
+    """Patch create_client function to return mock."""
+    with patch("supabase.create_client", return_value=mock_supabase_client):
+        with patch("services.vector_store.create_client", return_value=mock_supabase_client):
+            with patch("services.auth_service.create_client", return_value=mock_supabase_client):
+                with patch("main.create_client", return_value=mock_supabase_client):
+                    yield
+
+
+@pytest.fixture(autouse=True)
+def patch_supabase_global(mock_supabase_client):
+    """Patch global supabase imports."""
     with patch("services.vector_store.supabase", mock_supabase_client):
         with patch("services.auth_service.supabase", mock_supabase_client):
             with patch("main.supabase", mock_supabase_client):
@@ -206,8 +216,10 @@ def patch_supabase(mock_supabase_client):
 
 
 @pytest.fixture(autouse=True)
-def patch_openai(mock_openai_client):
-    """Automatically patch OpenAI client in all tests."""
+def patch_openai_global(mock_openai_client):
+    """Patch OpenAI client in all services."""
     with patch("services.embedding_service.openai_client", mock_openai_client):
-        with patch("services.rag_service.openai_client", mock_openai_client):
-            yield
+        with patch("services.embedding_service.OpenAI", return_value=mock_openai_client):
+            with patch("services.rag_service.openai_client", mock_openai_client):
+                with patch("services.rag_service.OpenAI", return_value=mock_openai_client):
+                    yield
