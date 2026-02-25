@@ -1,12 +1,14 @@
 """
 Shared test fixtures and configurations for all tests.
+Apply patches at the EARLIEST possible stage - before any imports!
 """
 
 import pytest
 import os
+import sys
 from unittest.mock import Mock, MagicMock, patch
 
-# Set test environment BEFORE importing anything
+# ========== CRITICAL: Set environment FIRST ==========
 os.environ["ENV"] = "testing"
 os.environ["OPENAI_API_KEY"] = "sk-test-key"
 os.environ["SUPABASE_URL"] = "https://test.supabase.co"
@@ -15,55 +17,74 @@ os.environ["JWT_SECRET_KEY"] = "test-secret-key"
 os.environ["DOCUMENTS_PATH"] = "/tmp/test_docs"
 
 
-@pytest.fixture
-def mock_supabase():
-    """Mock Supabase client."""
-    mock = MagicMock()
-    mock_table = MagicMock()
-    mock.table.return_value = mock_table
+# ========== pytest_configure hook - runs BEFORE collecting tests ==========
+def pytest_configure(config):
+    """Apply patches before test collection."""
+    # Create mocks
+    supabase_mock = MagicMock()
+    openai_mock = MagicMock()
     
-    # Default responses
-    response = MagicMock()
-    response.data = [{"id": 1}]
+    # Configure Supabase mock
+    table_mock = MagicMock()
+    response = MagicMock(data=[{"id": 1}])
     
-    mock_table.insert.return_value.execute.return_value = response
-    mock_table.select.return_value.execute.return_value = response
-    mock_table.select.return_value.eq.return_value.execute.return_value = response
-    mock_table.delete.return_value.eq.return_value.execute.return_value = response
+    table_mock.insert.return_value.execute.return_value = response
+    table_mock.select.return_value.execute.return_value = response
+    table_mock.select.return_value.eq.return_value.execute.return_value = response
+    table_mock.delete.return_value.eq.return_value.execute.return_value = response
     
-    mock_rpc_response = MagicMock()
-    mock_rpc_response.data = [{"id": 1, "content": "test", "similarity": 0.95}]
-    mock.rpc.return_value.execute.return_value = mock_rpc_response
+    rpc_response = MagicMock(data=[{"id": 1, "content": "test", "similarity": 0.95}])
+    supabase_mock.table.return_value = table_mock
+    supabase_mock.rpc.return_value.execute.return_value = rpc_response
     
-    return mock
-
-
-@pytest.fixture
-def mock_openai():
-    """Mock OpenAI client."""
-    mock = MagicMock()
-    
-    # Mock embeddings
+    # Configure OpenAI mock
     embed_response = MagicMock()
     embed_response.data = [MagicMock() for _ in range(3)]
     for item in embed_response.data:
         item.embedding = [0.1] * 1536
-    mock.embeddings.create.return_value = embed_response
+    openai_mock.embeddings.create.return_value = embed_response
     
-    # Mock chat completions
     chat_response = MagicMock()
     chat_response.choices = [MagicMock()]
     chat_response.choices[0].message.content = "Test response"
-    mock.chat.completions.create.return_value = chat_response
+    openai_mock.chat.completions.create.return_value = chat_response
     
-    return mock
+    # Apply patches GLOBALLY
+    patch("supabase.create_client", return_value=supabase_mock).start()
+    patch("openai.OpenAI", return_value=openai_mock).start()
 
 
-@pytest.fixture(autouse=True)
-def mock_external_services(mock_supabase, mock_openai):
-    """Auto-patch all external services."""
-    with patch("supabase.create_client", return_value=mock_supabase):
-        with patch("openai.OpenAI", return_value=mock_openai):
+@pytest.fixture(scope="function", autouse=True)
+def mock_dependencies():
+    """Inject mocks into all tests."""
+    supabase_mock = MagicMock()
+    openai_mock = MagicMock()
+    
+    table_mock = MagicMock()
+    response = MagicMock(data=[{"id": 1}])
+    
+    table_mock.insert.return_value.execute.return_value = response
+    table_mock.select.return_value.execute.return_value = response
+    table_mock.select.return_value.eq.return_value.execute.return_value = response
+    table_mock.delete.return_value.eq.return_value.execute.return_value = response
+    
+    rpc_response = MagicMock(data=[{"id": 1, "content": "test", "similarity": 0.95}])
+    supabase_mock.table.return_value = table_mock
+    supabase_mock.rpc.return_value.execute.return_value = rpc_response
+    
+    embed_response = MagicMock()
+    embed_response.data = [MagicMock() for _ in range(3)]
+    for item in embed_response.data:
+        item.embedding = [0.1] * 1536
+    openai_mock.embeddings.create.return_value = embed_response
+    
+    chat_response = MagicMock()
+    chat_response.choices = [MagicMock()]
+    chat_response.choices[0].message.content = "Test response"
+    openai_mock.chat.completions.create.return_value = chat_response
+    
+    with patch("supabase.create_client", return_value=supabase_mock):
+        with patch("openai.OpenAI", return_value=openai_mock):
             yield
 
 
