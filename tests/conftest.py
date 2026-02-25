@@ -8,41 +8,31 @@ from unittest.mock import Mock, MagicMock, patch
 from datetime import datetime
 from fastapi.testclient import TestClient
 
-# Set test environment
+# Set test environment BEFORE importing anything else
 os.environ["ENV"] = "testing"
-
-
-@pytest.fixture(scope="session")
-def test_env():
-    """Load test environment variables."""
-    test_env = {
-        "OPENAI_API_KEY": "sk-test-key-1234567890",
-        "EMBEDDING_MODEL": "text-embedding-3-large",
-        "CHAT_MODEL": "gpt-4-turbo-preview",
-        "SUPABASE_URL": "https://test.supabase.co",
-        "SUPABASE_KEY": "test-key",
-        "JWT_SECRET_KEY": "test-secret-key",
-        "JWT_ALGORITHM": "HS256",
-        "ACCESS_TOKEN_EXPIRE_MINUTES": "30",
-        "REFRESH_TOKEN_EXPIRE_DAYS": "7",
-        "CHUNK_SIZE": "500",
-        "CHUNK_OVERLAP": "50",
-        "DOCUMENTS_PATH": "/tmp/test_documents",
-        "SMTP_HOST": "smtp.gmail.com",
-        "SMTP_PORT": "587",
-        "SMTP_USER": "test@gmail.com",
-        "SMTP_PASSWORD": "test-password",
-        "EMAIL_FROM": "test@example.com",
-    }
-    for key, value in test_env.items():
-        os.environ[key] = value
-    return test_env
+os.environ["OPENAI_API_KEY"] = "sk-test-key-1234567890"
+os.environ["SUPABASE_URL"] = "https://test.supabase.co"
+os.environ["SUPABASE_KEY"] = "test-key"
+os.environ["JWT_SECRET_KEY"] = "test-secret-key"
+os.environ["JWT_ALGORITHM"] = "HS256"
+os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = "30"
+os.environ["REFRESH_TOKEN_EXPIRE_DAYS"] = "7"
+os.environ["CHUNK_SIZE"] = "500"
+os.environ["CHUNK_OVERLAP"] = "50"
+os.environ["DOCUMENTS_PATH"] = "/tmp/test_documents"
+os.environ["SMTP_HOST"] = "smtp.gmail.com"
+os.environ["SMTP_PORT"] = "587"
+os.environ["SMTP_USER"] = "test@gmail.com"
+os.environ["SMTP_PASSWORD"] = "test-password"
+os.environ["EMAIL_FROM"] = "test@example.com"
 
 
 @pytest.fixture
 def mock_openai_client():
     """Mock OpenAI client."""
     mock_client = MagicMock()
+
+    # Mock chat completions
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
     mock_response.choices[0].message.content = "Test response from AI"
@@ -50,8 +40,9 @@ def mock_openai_client():
 
     # Mock embeddings
     mock_embedding_response = MagicMock()
-    mock_embedding_response.data = [MagicMock()]
-    mock_embedding_response.data[0].embedding = [0.1] * 1536  # 1536 dimensions
+    mock_embedding_response.data = [MagicMock() for _ in range(3)]
+    for i, item in enumerate(mock_embedding_response.data):
+        item.embedding = [0.1] * 1536
     mock_client.embeddings.create.return_value = mock_embedding_response
 
     return mock_client
@@ -64,26 +55,29 @@ def mock_supabase_client():
     mock_table = MagicMock()
     mock_client.table.return_value = mock_table
 
-    # Mock insert
-    mock_insert = MagicMock()
-    mock_insert.execute.return_value = MagicMock(data=[{"id": 1}])
-    mock_table.insert.return_value = mock_insert
+    # Mock database operations
+    mock_response = MagicMock()
+    mock_response.data = [{"id": 1}]
 
-    # Mock select
-    mock_select = MagicMock()
-    mock_select.execute.return_value = MagicMock(
-        data=[{"id": 1, "email": "test@example.com"}]
+    mock_table.insert.return_value.execute.return_value = mock_response
+    mock_table.select.return_value.execute.return_value = mock_response
+    mock_table.select.return_value.eq.return_value.execute.return_value = (
+        mock_response
     )
-    mock_table.select.return_value = mock_select
-    mock_select.eq.return_value = mock_select
-    mock_select.single.return_value = mock_select
+    mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = (
+        mock_response
+    )
+    mock_table.delete.return_value.eq.return_value.execute.return_value = (
+        mock_response
+    )
 
-    # Mock RPC calls
-    mock_rpc = MagicMock()
-    mock_rpc.execute.return_value = MagicMock(
-        data=[{"id": 1, "content": "test", "similarity": 0.95}]
-    )
-    mock_client.rpc.return_value = mock_rpc
+    # Mock RPC calls for vector search
+    mock_rpc_response = MagicMock()
+    mock_rpc_response.data = [
+        {"id": 1, "content": "test", "similarity": 0.95},
+        {"id": 2, "content": "test2", "similarity": 0.87},
+    ]
+    mock_client.rpc.return_value.execute.return_value = mock_rpc_response
 
     return mock_client
 
@@ -183,21 +177,37 @@ def test_refresh_token():
 
 
 @pytest.fixture
-def fastapi_test_client(test_env, mock_openai_client, mock_supabase_client):
+def fastapi_test_client(mock_openai_client, mock_supabase_client):
     """Create FastAPI test client with mocked services."""
-    from fastapi import FastAPI, Depends
-    from fastapi.testclient import TestClient
+    with patch("services.embedding_service.OpenAI", return_value=mock_openai_client):
+        with patch("services.rag_service.OpenAI", return_value=mock_openai_client):
+            with patch(
+                "services.vector_store.create_client", return_value=mock_supabase_client
+            ):
+                with patch(
+                    "services.auth_service.create_client", return_value=mock_supabase_client
+                ):
+                    with patch(
+                        "main.create_client", return_value=mock_supabase_client
+                    ):
+                        # Import after patching
+                        from main import app
 
-    # Import your main app
-    from main import app
-
-    # Create test client
-    return TestClient(app)
+                        return TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def reset_environment():
-    """Reset environment after each test."""
-    yield
-    # Cleanup code here if needed
-    pass
+def patch_supabase(mock_supabase_client):
+    """Automatically patch Supabase client in all tests."""
+    with patch("services.vector_store.supabase", mock_supabase_client):
+        with patch("services.auth_service.supabase", mock_supabase_client):
+            with patch("main.supabase", mock_supabase_client):
+                yield
+
+
+@pytest.fixture(autouse=True)
+def patch_openai(mock_openai_client):
+    """Automatically patch OpenAI client in all tests."""
+    with patch("services.embedding_service.openai_client", mock_openai_client):
+        with patch("services.rag_service.openai_client", mock_openai_client):
+            yield
