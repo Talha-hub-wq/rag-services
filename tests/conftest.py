@@ -5,86 +5,74 @@ Shared test fixtures and configurations for all tests.
 import pytest
 import os
 from unittest.mock import Mock, MagicMock, patch
-from datetime import datetime
-from fastapi.testclient import TestClient
 
-# Set test environment BEFORE importing anything else
+# Set test environment BEFORE importing anything
 os.environ["ENV"] = "testing"
-os.environ["OPENAI_API_KEY"] = "sk-test-key-1234567890"
+os.environ["OPENAI_API_KEY"] = "sk-test-key"
 os.environ["SUPABASE_URL"] = "https://test.supabase.co"
 os.environ["SUPABASE_KEY"] = "test-key"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key"
-os.environ["JWT_ALGORITHM"] = "HS256"
-os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = "30"
-os.environ["REFRESH_TOKEN_EXPIRE_DAYS"] = "7"
-os.environ["CHUNK_SIZE"] = "500"
-os.environ["CHUNK_OVERLAP"] = "50"
-os.environ["DOCUMENTS_PATH"] = "/tmp/test_documents"
-os.environ["SMTP_HOST"] = "smtp.gmail.com"
-os.environ["SMTP_PORT"] = "587"
-os.environ["SMTP_USER"] = "test@gmail.com"
-os.environ["SMTP_PASSWORD"] = "test-password"
-os.environ["EMAIL_FROM"] = "test@example.com"
+os.environ["DOCUMENTS_PATH"] = "/tmp/test_docs"
 
 
 @pytest.fixture
-def mock_openai_client():
-    """Mock OpenAI client."""
-    mock_client = MagicMock()
-
-    # Mock chat completions
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "Test response from AI"
-    mock_client.chat.completions.create.return_value = mock_response
-
-    # Mock embeddings
-    mock_embedding_response = MagicMock()
-    mock_embedding_response.data = [MagicMock() for _ in range(3)]
-    for i, item in enumerate(mock_embedding_response.data):
-        item.embedding = [0.1] * 1536
-    mock_client.embeddings.create.return_value = mock_embedding_response
-
-    return mock_client
-
-
-@pytest.fixture
-def mock_supabase_client():
+def mock_supabase():
     """Mock Supabase client."""
-    mock_client = MagicMock()
+    mock = MagicMock()
     mock_table = MagicMock()
-    mock_client.table.return_value = mock_table
-
-    # Mock database operations
-    mock_response = MagicMock()
-    mock_response.data = [{"id": 1}]
-
-    mock_table.insert.return_value.execute.return_value = mock_response
-    mock_table.select.return_value.execute.return_value = mock_response
-    mock_table.select.return_value.eq.return_value.execute.return_value = (
-        mock_response
-    )
-    mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = (
-        mock_response
-    )
-    mock_table.delete.return_value.eq.return_value.execute.return_value = (
-        mock_response
-    )
-
-    # Mock RPC calls for vector search
+    mock.table.return_value = mock_table
+    
+    # Default responses
+    response = MagicMock()
+    response.data = [{"id": 1}]
+    
+    mock_table.insert.return_value.execute.return_value = response
+    mock_table.select.return_value.execute.return_value = response
+    mock_table.select.return_value.eq.return_value.execute.return_value = response
+    mock_table.delete.return_value.eq.return_value.execute.return_value = response
+    
     mock_rpc_response = MagicMock()
-    mock_rpc_response.data = [
-        {"id": 1, "content": "test", "similarity": 0.95},
-        {"id": 2, "content": "test2", "similarity": 0.87},
-    ]
-    mock_client.rpc.return_value.execute.return_value = mock_rpc_response
+    mock_rpc_response.data = [{"id": 1, "content": "test", "similarity": 0.95}]
+    mock.rpc.return_value.execute.return_value = mock_rpc_response
+    
+    return mock
 
-    return mock_client
+
+@pytest.fixture
+def mock_openai():
+    """Mock OpenAI client."""
+    mock = MagicMock()
+    
+    # Mock embeddings
+    embed_response = MagicMock()
+    embed_response.data = [MagicMock() for _ in range(3)]
+    for item in embed_response.data:
+        item.embedding = [0.1] * 1536
+    mock.embeddings.create.return_value = embed_response
+    
+    # Mock chat completions
+    chat_response = MagicMock()
+    chat_response.choices = [MagicMock()]
+    chat_response.choices[0].message.content = "Test response"
+    mock.chat.completions.create.return_value = chat_response
+    
+    return mock
+
+
+@pytest.fixture(autouse=True)
+def mock_external_services(mock_supabase, mock_openai):
+    """Auto-patch all external services."""
+    with patch("supabase.create_client", return_value=mock_supabase):
+        with patch("openai.OpenAI", return_value=mock_openai):
+            yield
+
+
 
 
 @pytest.fixture
 def sample_user_data():
     """Sample user data for testing."""
+    from datetime import datetime
     return {
         "id": "test-user-123",
         "email": "testuser@example.com",
@@ -174,52 +162,3 @@ def test_refresh_token():
 
     token = jwt.encode(payload, secret_key, algorithm=algorithm)
     return token
-
-
-@pytest.fixture
-def fastapi_test_client(mock_openai_client, mock_supabase_client):
-    """Create FastAPI test client with mocked services."""
-    with patch("services.embedding_service.OpenAI", return_value=mock_openai_client):
-        with patch("services.rag_service.OpenAI", return_value=mock_openai_client):
-            with patch(
-                "services.vector_store.create_client", return_value=mock_supabase_client
-            ):
-                with patch(
-                    "services.auth_service.create_client", return_value=mock_supabase_client
-                ):
-                    with patch(
-                        "main.create_client", return_value=mock_supabase_client
-                    ):
-                        # Import after patching
-                        from main import app
-
-                        return TestClient(app)
-
-
-@pytest.fixture(autouse=True)
-def patch_supabase_create(mock_supabase_client):
-    """Patch create_client function to return mock."""
-    with patch("supabase.create_client", return_value=mock_supabase_client):
-        with patch("services.vector_store.create_client", return_value=mock_supabase_client):
-            with patch("services.auth_service.create_client", return_value=mock_supabase_client):
-                with patch("main.create_client", return_value=mock_supabase_client):
-                    yield
-
-
-@pytest.fixture(autouse=True)
-def patch_supabase_global(mock_supabase_client):
-    """Patch global supabase imports."""
-    with patch("services.vector_store.supabase", mock_supabase_client):
-        with patch("services.auth_service.supabase", mock_supabase_client):
-            with patch("main.supabase", mock_supabase_client):
-                yield
-
-
-@pytest.fixture(autouse=True)
-def patch_openai_global(mock_openai_client):
-    """Patch OpenAI client in all services."""
-    with patch("services.embedding_service.openai_client", mock_openai_client):
-        with patch("services.embedding_service.OpenAI", return_value=mock_openai_client):
-            with patch("services.rag_service.openai_client", mock_openai_client):
-                with patch("services.rag_service.OpenAI", return_value=mock_openai_client):
-                    yield
