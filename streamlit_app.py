@@ -8,7 +8,7 @@ import time
 # ===========================
 # CONFIGURATION
 # ===========================
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://http://rag-backend.dza7hmatg5c6epcb.eastus.azurecontainer.io:8000"
 
 # Page config
 st.set_page_config(
