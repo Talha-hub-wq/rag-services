@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=50, env="CHUNK_OVERLAP")
 
     # Local Documents Path
-    documents_path: str = Field(..., env="DOCUMENTS_PATH")
+    documents_path: str = Field(default="/tmp", env="DOCUMENTS_PATH")
 
     # JWT Configuration
     jwt_secret_key: str = Field(..., env="JWT_SECRET_KEY")
